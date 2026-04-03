@@ -5,12 +5,145 @@ Changelog
 Upcoming version (not yet released)
 -----------------------------------
 
+Added
+^^^^^
+
+- Added ``reduce`` field to ``MetricsTermCfg``. Setting ``reduce="last"``
+  reports the value from the final step of the episode rather than the
+  episode mean, which is useful for binary success metrics.
+- Added :class:`~mjlab.envs.mdp.actions.RelativeJointPositionAction` for
+  joint position control relative to the current configuration. The target is
+  ``current_pos + action * scale``, so a zero action holds the current
+  configuration rather than commanding the default pose.
+- Added :func:`~mjlab.envs.mdp.dr.pair_friction` for randomizing geom-pair
+  friction overrides (``pair_friction`` in ``mjModel``).
+- Added ``STAIRS_TERRAINS_CFG`` terrain preset for progressive stair
+  curriculum training and ``@terrain_preset`` decorator for composing
+  terrain configurations from reusable presets.
+- Added cartpole balance and swingup tasks (``Mjlab-Cartpole-Balance`` and
+  ``Mjlab-Cartpole-Swingup``) with a :ref:`tutorial <tutorial-cartpole>`
+  that walks through building an environment from scratch.
+- Added :ref:`motion imitation <motion-imitation>` documentation with
+  preprocessing instructions. The README now links here instead of the
+  BeyondMimic repository, which produced incompatible NPZ files when used
+  with mjlab (:issue:`777`).
+- Added ``margin``, ``gap``, and ``solmix`` fields to ``CollisionCfg``
+  for per geom contact parameter configuration (:issue:`766`).
+- NaN guard now captures mocap body poses (``mocap_pos``, ``mocap_quat``)
+  when the model has mocap bodies, enabling full state reconstruction in
+  the dump viewer for fixed-base entities.
+- Implemented ``ActionTermCfg.clip`` for clamping processed actions after
+  scale and offset (:issue:`771`).
+- Added ``qfrc_actuator`` and ``qfrc_external`` generalized force accessors
+  to ``EntityData``. ``qfrc_actuator`` gives actuator forces in joint space
+  (projected through the transmission). ``qfrc_external`` recovers the
+  generalized force from body external wrenches (``xfrc_applied``)
+  (:issue:`776`).
+- Added ``RewardBarPanel`` to the Viser viewer, showing horizontal bars for
+  each reward term with a running mean over ~1 second (:issue:`800`).
+- Added ``per_substep`` flag to ``MetricsTermCfg`` for evaluating metrics
+  once per physics substep inside the decimation loop. The per substep
+  values are averaged within each environment step, so episode averages
+  remain comparable to regular per step metrics.
+- Added ``project-instinct/InstinctMJ`` to the research page's list of
+  projects built on mjlab.
+- Added a Checkpoints tab to the Viser play viewer for hot-swapping
+  checkpoints without restarting. Works with local directories and W&B
+  runs (:issue:`751`). Contribution by @omarrayyann.
+- Added ``"segmentation"`` camera data type for per-pixel geom ID output
+  alongside RGB and depth, and a multi-cube goal-conditioned lifting task
+  (``Mjlab-Multi-Cube-Seg-Yam``) that uses it (:issue:`862`).
+  Contribution by @pthangeda.
+
+Changed
+^^^^^^^
+
+- Actuator delay is now configured inline on any ``ActuatorCfg`` subclass
+  (e.g. ``BuiltinPositionActuatorCfg(..., delay_min_lag=2, delay_max_lag=5)``)
+  instead of wrapping with ``DelayedActuatorCfg``. ``DelayedActuator``,
+  ``DelayedActuatorCfg``, and ``DelayedBuiltinActuatorGroup`` are removed.
+- Removed ``delay_target`` from ``ActuatorCfg``. Delay now always applies to
+  the actuator's ``command_field`` automatically. Multi-target delay
+  (``delay_target=("position", "velocity")``) is no longer supported.
+- ``XmlPositionActuatorCfg``, ``XmlVelocityActuatorCfg``, ``XmlMotorActuatorCfg``,
+  and ``XmlMuscleActuatorCfg`` are replaced by a single ``XmlActuatorCfg`` that auto
+  detects the actuator type from XML. Pass ``command_field=...`` to override detection.
+- Replaced the viser viewer internals with the ``mjviser`` package. Scene
+  creation, mesh conversion, and overlay rendering (contacts, forces,
+  inertia, tendons, joints, frames) are now provided by mjviser. The viewer
+  exposes a new Visualization tab for overlay controls and a Groups tab for
+  geom/site visibility. Debug visualization and warp tensor conversion remain
+  in mjlab's ``MjlabViserScene`` subclass (:issue:`839`).
+- In curriculum terrain mode, each terrain type now gets exactly one column
+  (``num_cols`` is set to ``len(sub_terrains)``). The ``proportion`` field
+  now controls robot spawning distribution across columns rather than column
+  count. Random mode is unchanged (:issue:`811`).
+- ``BoxSteppingStonesTerrainCfg`` stone size now decreases with difficulty,
+  interpolating from the large end of ``stone_size_range`` at difficulty 0
+  to the small end at difficulty 1 (:issue:`785`).
+- Removed deprecated ``TerrainImporter`` and ``TerrainImporterCfg`` aliases.
+  Use ``TerrainEntity`` and ``TerrainEntityCfg`` instead (:issue:`667`).
+- ``Entity.clear_state()`` is deprecated. Use ``Entity.reset()`` instead.
+  ``clear_state`` only zeroed actuator targets without resetting actuator
+  internal state (e.g. delay buffers), which could cause stale commands
+  after teleporting the robot to a new pose.
+- Removed ``EntityData.generalized_force``. The property was bugged (indexed
+  free joint DOFs instead of articulated DOFs) and the name was ambiguous.
+  Use ``qfrc_actuator`` or ``qfrc_external`` instead (:issue:`776`).
+
 Fixed
 ^^^^^
 
+- Fixed ``SceneEntityCfg`` names and IDs ordering mismatch when
+  ``preserve_order=False`` (:issue:`876`). Contribution by @jsw7460.
+- Fixed ONNX export path resolution in the velocity, manipulation, and
+  tracking runners when a parent directory name contains the word
+  ``"model"`` (:issue:`867`). Contribution by @gokulp01.
+- ``export-scene`` now writes only referenced assets and places them
+  correctly under the output directory. Previously, asset keys containing
+  path traversal could write files outside the output directory, and all
+  spec assets were included regardless of whether the scene XML referenced
+  them (:issue:`858`).
+- ``electrical_power_cost`` now uses ``qfrc_actuator`` (joint space) instead
+  of ``actuator_force`` (actuation space) for mechanical power computation.
+  Previously the reward was incorrect for actuators with gear ratios other
+  than 1 (:issue:`776`).
+- ``create_velocity_actuator`` no longer sets ``ctrllimited=True`` with
+  ``inheritrange=1.0``. This caused a ``ValueError`` for continuous joints
+  (e.g. wheels) that have no position range defined (:issue:`787`).
+- ``write_root_com_velocity_to_sim`` no longer fails with tensor ``env_ids``
+  on floating base entities (:issue:`793`).
+- Joint limits for unlimited joints are now set to [-inf, inf] instead of
+  [0, 0]. Previously the zero range caused incorrect clamping for entities
+  with unlimited hinge or slide joints.
+- Contact force visualization now copies ``ctrl`` into the CPU ``MjData``
+  before calling ``mj_forward``. Actuators that compute torques in Python
+  (``DcMotorActuator``, ``IdealPdActuator``) previously showed incorrect
+  contact forces because the viewer ran with ``ctrl=0``
+  (:issue:`786`).
+- ``BoxSteppingStonesTerrainCfg`` no longer creates a large gap around the
+  platform. Stones are now only skipped when their center falls inside the
+  platform; edges that extend under the platform are allowed since the
+  platform covers them (:issue:`785`).
+- ``dr.pseudo_inertia`` no longer loads cuSOLVER, eliminating ~4 GB of
+  persistent GPU memory overhead. Cholesky and eigendecomposition are now
+  computed analytically for the small matrices involved (4x4 and 3x3)
+  (:issue:`753`).
 - Set terrain geom mass to zero so that the static terrain body does not
   inflate ``stat.meanmass``, which made force arrow visualization invisible
   on rough terrain (:issue:`734`, :issue:`537`).
+- Native viewer now syncs ``qpos0`` when domain randomized, fixing incorrect
+  body positions after ``dr.joint_default_pos`` randomization
+  (:issue:`760`).
+- ``command_manager.compute()`` is now called during ``reset()`` so that
+  derived command state (e.g. relative body positions in tracking
+  environments) is populated before the first observation is returned
+  (:issue:`761`).
+- ``RayCastSensor`` with ``ray_alignment="yaw"`` or ``"world"`` now correctly
+  aligns the frame offset when attached to a site or geom with a local offset
+  from its parent body. Previously only ray directions and pattern offsets were
+  aligned, causing the frame position to swing with body pitch/roll
+  (:issue:`775`).
 
 Version 1.2.0 (March 6, 2026)
 -----------------------------
@@ -38,6 +171,17 @@ Added
   to bodies with configurable duration and optional application point offset.
 - ONNX auto-export and metadata attachment for manipulation tasks (lift cube)
   on every checkpoint save, matching the velocity and tracking task behavior.
+- Multi-frame ``RayCastSensor``: pass a tuple of ``ObjRef`` to ``frame`` for
+  per-site raycasting with independent body exclusion. New properties:
+  ``num_frames``, ``num_rays_per_frame``. New ``RayCastData`` fields:
+  ``frame_pos_w`` and ``frame_quat_w``.
+- ``RingPatternCfg`` ray pattern for concentric ring sampling around each
+  frame.
+- ``TerrainHeightSensor``, a ``RayCastSensor`` subclass that computes
+  per-frame vertical clearance above terrain (``sensor.data.heights``).
+  Velocity task configs now use it for ``feet_clearance``,
+  ``feet_swing_height``, and ``foot_height``, replacing the previous
+  world-Z proxy that was incorrect on rough terrain.
 - Cloud training support via `SkyPilot <https://skypilot.readthedocs.io/>`_
   and Lambda Cloud, with documentation covering setup, monitoring, and
   cost management.
